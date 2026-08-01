@@ -111,7 +111,7 @@ TOOLS = [web_search, calculator, save_note, recall_notes]
 # ---------------------------------------------------------------------------
 # AGENT NODE
 # ---------------------------------------------------------------------------
-llm = ChatOllama(model="llama3.1", temperature=0)
+llm = ChatOllama(model="qwen2.5:0.5b", temperature=0)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 SYSTEM_PROMPT = SystemMessage(content=(
@@ -159,4 +159,4 @@ if __name__ == "__main__":
             break
 
         result = app.invoke({"messages": [("user", user_input)]}, config=config)
-        print("Assistant:", result["messages"][-1].content, "\n")
+        print("Assistant:", result["messages"][-1].content, "")
