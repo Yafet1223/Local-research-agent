@@ -20,21 +20,20 @@ edge that loops between them until the LLM stops requesting tools.
       END
 
 Requires:
-    pip install langgraph langchain-ollama --break-system-packages
+    pip install langgraph langchain-google-genai python-dotenv
 
-Make sure Ollama is running locally and you've pulled a tool-calling-capable model:
-    ollama pull llama3.1
-    (or: qwen2.5, llama3.2, llama3-groq-tool-use)
+Make sure .env contains GOOGLE_API_KEY or GEMINI_API_KEY.
 
 Run it:
-    python assistant.py
+    python agent/yafet.py
 """
 
 import ast
 import operator
 import os
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -115,8 +114,23 @@ TOOLS = [web_search, calculator, save_note, recall_notes]
 # ---------------------------------------------------------------------------
 # AGENT NODE
 # ---------------------------------------------------------------------------
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-llm_with_tools = llm.bind_tools(TOOLS)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+llm_with_tools = None
+
+
+def get_llm_with_tools():
+    global llm_with_tools
+    if llm_with_tools is None:
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("Missing GOOGLE_API_KEY or GEMINI_API_KEY in .env")
+        llm = ChatGoogleGenerativeAI(
+            model=GEMINI_MODEL,
+            temperature=0,
+            google_api_key=api_key,
+        )
+        llm_with_tools = llm.bind_tools(TOOLS)
+    return llm_with_tools
 
 SYSTEM_PROMPT = SystemMessage(content=(
     "You are a helpful personal research assistant. "
@@ -126,7 +140,7 @@ SYSTEM_PROMPT = SystemMessage(content=(
 ))
 
 def agent(state: MessagesState) -> dict:
-    response = llm_with_tools.invoke([SYSTEM_PROMPT] + state["messages"])
+    response = get_llm_with_tools().invoke([SYSTEM_PROMPT] + state["messages"])
     return {"messages": [response]}
 
 

@@ -383,7 +383,7 @@
             <input id="messageInput" type="text" placeholder="Ask Sage something…" autocomplete="off" />
             <button id="sendBtn">Send</button>
         </div>
-        <div class="hint">Local model via Ollama · memory persists for this session</div>
+        <div class="hint">Gemini 2.5 via API key · memory persists for this session</div>
     </div>
 
     <script>
@@ -483,7 +483,8 @@
                 removeThinking();
 
                 if (!res.ok) {
-                    addMessage('agent', 'Something went wrong: ' + (data.error || 'unknown error'));
+                    const message = data.detail || data.error || data.message || 'unknown error';
+                    addMessage('agent', 'Something went wrong: ' + message);
                     return;
                 }
 

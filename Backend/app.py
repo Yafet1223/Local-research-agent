@@ -5,7 +5,7 @@ This file handles HTTP: routing, request validation, and calling into the
 agent. All agent logic lives in agent/yafet.py.
 
 Requires:
-    pip install fastapi uvicorn langgraph langchain-google-genai --break-system-packages
+    pip install fastapi uvicorn langgraph langchain-google-genai python-dotenv
 
 Run:
     uvicorn app:app --reload --port 5000
@@ -17,6 +17,7 @@ Then open:
 import sys
 import os
 import uuid
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +53,7 @@ class ChatResponse(BaseModel):
 
 
 app = FastAPI(title="Sage")
+logger = logging.getLogger("sage")
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -74,6 +76,7 @@ def chat(req: ChatRequest):
     try:
         result = app_graph.invoke({"messages": [("user", message)]}, config=config)
     except Exception as e:
+        logger.exception("Agent invocation failed")
         raise HTTPException(status_code=500, detail=f"Agent error: {e}")
 
     new_messages = result["messages"][before_count:]
