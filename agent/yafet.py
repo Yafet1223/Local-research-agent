@@ -135,8 +135,8 @@ def get_llm_with_tools():
 SYSTEM_PROMPT = SystemMessage(content=(
     "You are a helpful personal research assistant. "
     "Use tools when they'd help: search for facts, calculator for math, "
-    "save_note to remember things the user wants kept, recall_notes to "
-    "check what you already know about the user before answering."
+    "save_note to remember things the user wants kept, recall_notes to check what you already know about the user before answring,"
+    
 ))
 
 def agent(state: MessagesState) -> dict:
