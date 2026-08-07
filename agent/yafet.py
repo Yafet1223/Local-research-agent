@@ -1,180 +1,358 @@
 """
+
 PROJECT: Personal Research & Notes Assistant
+
 =============================================
 
+
+
 A ReAct-style LangGraph agent that can:
+
   - search the web (mocked — no API key needed)
+
   - do real arithmetic
+
   - save notes to long-term memory (persists across separate conversations)
+
   - recall notes from long-term memory
 
+
+
 This is the standard "agent" shape you'll meet in almost every real LangGraph
+
 project: an LLM node bound to tools, a tool-execution node, and a conditional
+
 edge that loops between them until the LLM stops requesting tools.
 
+
+
     ┌──────┐  has tool_calls?  ┌───────┐
+
     │agent │ ────────────────► │ tools │
+
     └──┬───┘ ◄──────────────── └───────┘
+
        │        no tool_calls
+
        ▼
+
       END
 
-Requires:
-    pip install langgraph langchain-google-genai python-dotenv
 
-Make sure .env contains GOOGLE_API_KEY or GEMINI_API_KEY.
+
+Requires:
+
+    pip install langgraph langchain-ollama ollama python-dotenv
+
+
+
+Make sure you have Ollama installed locally and a model like `llama2` available.
+
+Configure `OLLAMA_MODEL` in `.env` if you want a different Ollama model.
+
+
 
 Run it:
+
     python agent/yafet.py
+
 """
 
+
+
 import ast
+
 import operator
+
 import os
+
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
+
+
 from langgraph.graph import StateGraph, MessagesState, START, END
+
 from langgraph.prebuilt import ToolNode, tools_condition
+
 from langgraph.checkpoint.memory import InMemorySaver
+
 from langgraph.store.memory import InMemoryStore
+
 from langgraph.config import get_store, get_config
+
 from langchain_core.tools import tool
+
 from langchain_core.messages import SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+
+from langchain_ollama import ChatOllama
+
+
+
 
 
 # ---------------------------------------------------------------------------
+
 # TOOLS
+
 # Each @tool becomes something the LLM can choose to call. get_store() and
+
 # get_config() give tools access to the graph's store/config at runtime —
+
 # no special injection wiring needed.
+
 # ---------------------------------------------------------------------------
+
 @tool
+
 def web_search(query: str) -> str:
+
     """Search the web for information on a topic. Use this for facts,
+
     current events, or anything you don't already know."""
+
     # Mocked — swap this out for a real search API (e.g. Tavily) later.
+
     return f"[mock search result for '{query}']: LangGraph is a graph-based agent framework by LangChain."
 
 
+
+
+
 _OPS = {
+
     ast.Add: operator.add, ast.Sub: operator.sub,
+
     ast.Mult: operator.mul, ast.Div: operator.truediv,
+
     ast.Pow: operator.pow, ast.USub: operator.neg,
+
 }
 
+
+
 def _safe_eval(node):
+
     if isinstance(node, ast.Constant):
+
         return node.value
+
     if isinstance(node, ast.BinOp):
+
         return _OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+
     if isinstance(node, ast.UnaryOp):
+
         return _OPS[type(node.op)](_safe_eval(node.operand))
+
     raise ValueError("Unsupported expression")
 
+
+
 @tool
+
 def calculator(expression: str) -> str:
+
     """Evaluate a basic arithmetic expression, e.g. '12 * (4 + 3)'."""
+
     try:
+
         result = _safe_eval(ast.parse(expression, mode="eval").body)
+
         return str(result)
+
     except Exception as e:
+
         return f"Error evaluating expression: {e}"
 
 
+
+
+
 @tool
+
 def save_note(note: str) -> str:
+
     """Save a piece of information to long-term memory so it can be
+
     recalled in future, separate conversations."""
+
     store = get_store()
+
     config = get_config()
+
     user_id = config["configurable"].get("user_id", "anonymous")
+
     key = f"note-{len(store.search(('user', user_id, 'notes')))}"
+
     store.put(("user", user_id, "notes"), key, {"text": note})
+
     return f"Saved note: {note}"
 
 
+
+
+
 @tool
+
 def recall_notes(query: str) -> str:
+
     """Search previously saved notes for relevant information."""
+
     store = get_store()
+
     config = get_config()
+
     user_id = config["configurable"].get("user_id", "anonymous")
+
     results = store.search(("user", user_id, "notes"), query=query)
+
     if not results:
+
         return "No relevant notes found."
+
     return "\n".join(f"- {r.value['text']}" for r in results)
+
+
+
 
 
 TOOLS = [web_search, calculator, save_note, recall_notes]
 
 
+
+
+
 # ---------------------------------------------------------------------------
+
 # AGENT NODE
+
 # ---------------------------------------------------------------------------
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
 llm_with_tools = None
 
 
+
+
+
 def get_llm_with_tools():
+
     global llm_with_tools
+
     if llm_with_tools is None:
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("Missing GOOGLE_API_KEY or GEMINI_API_KEY in .env")
-        llm = ChatGoogleGenerativeAI(
-            model=GEMINI_MODEL,
+
+        llm = ChatOllama(
+
+            model=OLLAMA_MODEL,
+
             temperature=0,
-            google_api_key=api_key,
+
+            base_url=OLLAMA_BASE_URL,
+
         )
+
         llm_with_tools = llm.bind_tools(TOOLS)
+
     return llm_with_tools
 
+
+
 SYSTEM_PROMPT = SystemMessage(content=(
+
     "You are a helpful personal research assistant. "
+
     "Use tools when they'd help: search for facts, calculator for math, "
+
     "save_note to remember things the user wants kept, recall_notes to check what you already know about the user before answring,"
+
     
+
 ))
 
+
+
 def agent(state: MessagesState) -> dict:
+
     response = get_llm_with_tools().invoke([SYSTEM_PROMPT] + state["messages"])
+
     return {"messages": [response]}
 
 
+
+
+
 # ---------------------------------------------------------------------------
+
 # BUILD THE GRAPH
+
 # ---------------------------------------------------------------------------
+
 graph = StateGraph(MessagesState)
+
 graph.add_node("agent", agent)
+
 graph.add_node("tools", ToolNode(TOOLS))
 
+
+
 graph.add_edge(START, "agent")
+
 graph.add_conditional_edges("agent", tools_condition)  # -> "tools" or END, built in
+
 graph.add_edge("tools", "agent")  # after running tools, loop back to the agent
 
+
+
 checkpointer = InMemorySaver()  # short-term: remembers this conversation
+
 store = InMemoryStore()         # long-term: remembers notes across conversations
+
+
 
 app = graph.compile(checkpointer=checkpointer, store=store)
 
 
+
+
+
 # ---------------------------------------------------------------------------
+
 # RUN IT — simple CLI chat loop
+
 # ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
+
     print("Personal Research & Notes Assistant. Type 'quit' to exit.\n")
+
     print("Try: 'What's 47 * 12?' / 'Remember that I prefer metric units' / "
+
           "'What do you know about my preferences?'\n")
+
+
 
     config = {"configurable": {"thread_id": "cli-session", "user_id": "you"}}
 
+
+
     while True:
+
         user_input = input("You: ")
+
         if user_input.strip().lower() in ("quit", "exit"):
+
             break
 
+
+
         result = app.invoke({"messages": [("user", user_input)]}, config=config)
+
         print("Assistant:", result["messages"][-1].content, "")
+
